@@ -124,21 +124,32 @@ def run_manual_sync(token_info: dict, user_id: str) -> dict:
                 results = None
         add_log(logs, f"Playlist currently contains {len(playlist_track_ids)} songs.")
 
-        # 4. Find New Songs to Add (in reverse order to maintain newest first)
-        new_track_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
+        # 4. Determine songs to add and remove
+        liked_track_ids = liked_tracks.keys()
+        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
+        tracks_to_remove_ids = list(playlist_track_ids - liked_track_ids)
 
-        # 5. Add New Songs
-        if new_track_uris:
+        # 5. Remove songs that are no longer liked
+        if tracks_to_remove_ids:
+            add_log(logs, f"Removing {len(tracks_to_remove_ids)} song(s) that are no longer liked...")
+            # Spotify API can remove 100 tracks at a time
+            for i in range(0, len(tracks_to_remove_ids), 100):
+                chunk = tracks_to_remove_ids[i:i + 100]
+                sp.playlist_remove_all_occurrences_of_items(playlist_id, chunk)
+            add_log(logs, f"🗑️ Successfully removed {len(tracks_to_remove_ids)} song(s).")
+
+        # 6. Add new liked songs
+        if tracks_to_add_uris:
             # To preserve the correct "newest first" order when adding more than 100 songs,
             # we chunk the list and add the chunks in reverse order.
-            add_log(logs, f"Adding {len(new_track_uris)} new song(s) to the playlist...")
+            add_log(logs, f"Adding {len(tracks_to_add_uris)} new song(s) to the playlist...")
 
-            chunks = [new_track_uris[i:i + 100] for i in range(0, len(new_track_uris), 100)]
+            chunks = [tracks_to_add_uris[i:i + 100] for i in range(0, len(tracks_to_add_uris), 100)]
             for chunk in reversed(chunks):
                 sp.playlist_add_items(playlist_id, chunk, position=0)
 
-            local_sync_status["synced_count"] = len(new_track_uris)
-            add_log(logs, f"✅ Successfully synced {len(new_track_uris)} new song(s).")
+            local_sync_status["synced_count"] = len(tracks_to_add_uris)
+            add_log(logs, f"✅ Successfully synced {len(tracks_to_add_uris)} new song(s).")
         else:
             add_log(logs, "✅ Playlist is already up-to-date. No new songs to sync.")
 
