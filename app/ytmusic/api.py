@@ -1,32 +1,33 @@
-from ytmusicapi import YTMusic
-from google.oauth2.credentials import Credentials
-from ..core import config
-
-# --- YouTube Music Client ---
+import json
+import os
+from tempfile import NamedTemporaryFile
+from ytmusicapi import YTMusic, OAuthCredentials
+from app.core import config
 
 def get_ytmusic_client(google_creds: dict) -> YTMusic:
     """
     Initializes the YTMusic client using credentials stored in Firestore.
-    The credentials dictionary must be converted to a google.oauth2.credentials.Credentials object.
+    This function creates a temporary oauth.json file to work with the
+    ytmusicapi library's file-based authentication system.
     """
-    # The google-auth library expects specific keys. We map our stored creds to them.
-    credentials = Credentials(
-        token=google_creds.get('token'),
-        refresh_token=google_creds.get('refresh_token'),
-        token_uri=google_creds.get('token_uri'),
-        client_id=google_creds.get('client_id'),
-        client_secret=google_creds.get('client_secret'),
-        scopes=google_creds.get('scopes')
-    )
+    # Create a temporary file to store the oauth.json content
+    with NamedTemporaryFile(mode='w', delete=False, suffix=".json") as temp_file:
+        json.dump(google_creds, temp_file)
+        temp_filepath = temp_file.name
 
-    # We need to refresh the credentials to make sure the token is valid
-    if credentials.expired and credentials.refresh_token:
-        from google.auth.transport.requests import Request
-        credentials.refresh(Request())
-
-
-    # The YTMusic library requires both the credentials object and a JSON representation.
-    return YTMusic(auth=credentials.to_json(), oauth_credentials=credentials)
+    try:
+        # Initialize the YTMusic client with the temporary file
+        ytmusic = YTMusic(
+            temp_filepath,
+            oauth_credentials=OAuthCredentials(
+                client_id=config.GOOGLE_CLIENT_ID,
+                client_secret=config.GOOGLE_CLIENT_SECRET
+            )
+        )
+        return ytmusic
+    finally:
+        # Clean up the temporary file
+        os.remove(temp_filepath)
 
 def search_song_on_ytmusic(ytmusic: YTMusic, spotify_track: dict) -> str | None:
     """
