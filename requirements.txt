@@ -5,3 +5,6 @@ jinja2
 python-dotenv
 spotipy
 itsdangerous
+ytmusicapi
+firebase-admin
+google-auth-oauthlib

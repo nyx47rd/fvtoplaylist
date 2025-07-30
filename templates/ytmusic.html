@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync to YouTube Music</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        .glow-button {
+            box-shadow: 0 0 5px #ef4444, 0 0 10px #ef4444, 0 0 15px #ef4444;
+            transition: all 0.3s ease-in-out;
+        }
+        .glow-button:hover:not(:disabled) {
+            box-shadow: 0 0 10px #f87171, 0 0 20px #f87171, 0 0 30px #f87171;
+        }
+        .card {
+            background-color: rgba(24, 24, 24, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-2xl mx-auto p-8 rounded-xl card text-center">
+        <h1 class="text-3xl font-bold mb-2 text-white">Spotify → YouTube Music</h1>
+        <p class="text-red-300 mb-8">✨ Transfer your liked songs playlist. ✨</p>
+
+        {% if user %}
+            <div class="mb-6 flex flex-col items-center">
+                <p class="text-lg">Logged in as <span class="font-bold text-violet-400">{{ user.display_name }}</span></p>
+                <a href="/" class="text-sm text-gray-400 hover:text-violet-500 transition-colors mt-2">← Back to Spotify Sync</a>
+            </div>
+
+            <div class="my-6 border-t border-gray-700"></div>
+
+            <!-- Main Content -->
+            <div id="dashboard" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6">
+                {% if google_auth_linked %}
+                    <h2 class="text-xl font-bold text-green-400 mb-4 text-center">✓ Google Account Linked</h2>
+                    <button id="sync-button" onclick="startYTMusicSync()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed">
+                        Transfer to YouTube Music
+                    </button>
+                {% else %}
+                    <h2 class="text-xl font-bold text-yellow-400 mb-4 text-center">Step 1: Link Your Google Account</h2>
+                    <p class="text-center mb-4">To transfer songs, you need to grant access to your YouTube account.</p>
+                    <a href="/ytmusic/login" class="w-full block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">
+                        Login with Google
+                    </a>
+                {% endif %}
+            </div>
+
+            <div id="logs-container" class="mt-4">
+                 <h3 class="font-semibold text-gray-300 mb-2">Transfer Log:</h3>
+                 <div id="logs" class="h-48 overflow-y-auto bg-gray-900/70 p-3 rounded font-mono text-sm space-y-1">
+                    <p class="text-gray-500">Waiting to start transfer...</p>
+                 </div>
+            </div>
+
+        {% else %}
+            <!-- This case should be handled by the redirect in the route -->
+            <p>Your Spotify session has expired. Please <a href="/" class="underline">go back</a> and log in with Spotify first.</p>
+        {% endif %}
+    </div>
+
+    {% if user and google_auth_linked %}
+    <script>
+        const syncButton = document.getElementById('sync-button');
+        const logsDiv = document.getElementById('logs');
+
+        async function startYTMusicSync() {
+            syncButton.disabled = true;
+            syncButton.textContent = 'Transferring...';
+            logsDiv.innerHTML = '<p class="text-violet-300">Initiating transfer...</p>';
+
+            try {
+                const response = await fetch('/ytmusic/sync', { method: 'POST' });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'An unknown error occurred.');
+                }
+
+                // We will implement log streaming later. For now, just show final message.
+                logsDiv.innerHTML = `<p class="text-green-400">${data.message}</p>`;
+
+            } catch (error) {
+                console.error('Failed to sync:', error);
+                logsDiv.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+            } finally {
+                syncButton.disabled = false;
+                syncButton.textContent = 'Transfer to YouTube Music';
+            }
+        }
+    </script>
+    {% endif %}
+</body>
+</html>
