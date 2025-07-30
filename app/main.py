@@ -19,16 +19,18 @@ from app.ytmusic import routes as ytmusic_routes
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Firebase Initialization ---
-try:
-    if config.FIREBASE_SERVICE_ACCOUNT_JSON:
-        cred_dict = json.loads(config.FIREBASE_SERVICE_ACCOUNT_JSON)
-        cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred)
-        logging.info("Firebase initialized successfully.")
-    else:
-        logging.warning("FIREBASE_SERVICE_ACCOUNT_JSON not found. Firebase features will be disabled.")
-except Exception as e:
-    logging.error(f"Failed to initialize Firebase: {e}")
+# Ensure Firebase is initialized only once
+if not firebase_admin._apps:
+    try:
+        if config.FIREBASE_SERVICE_ACCOUNT_JSON:
+            cred_dict = json.loads(config.FIREBASE_SERVICE_ACCOUNT_JSON)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+            logging.info("Firebase initialized successfully.")
+        else:
+            logging.warning("FIREBASE_SERVICE_ACCOUNT_JSON not found. Firebase features will be disabled.")
+    except Exception as e:
+        logging.error(f"Failed to initialize Firebase: {e}")
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
