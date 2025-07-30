@@ -1,8 +1,10 @@
+print("-----> Starting application...")
 import os
 import secrets
 import json
 import logging
 from fastapi import FastAPI, Request, Depends, HTTPException
+print("-----> Imports in main.py successful.")
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
