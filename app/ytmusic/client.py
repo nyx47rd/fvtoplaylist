@@ -19,6 +19,12 @@ def get_ytmusic_client(google_creds: dict) -> YTMusic:
         scopes=google_creds.get('scopes')
     )
 
+    # We need to refresh the credentials to make sure the token is valid
+    if credentials.expired and credentials.refresh_token:
+        from google.auth.transport.requests import Request
+        credentials.refresh(Request())
+
+
     # The YTMusic library requires both the credentials object and a JSON representation.
     return YTMusic(auth=credentials.to_json(), oauth_credentials=credentials)
 
