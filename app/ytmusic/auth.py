@@ -1,30 +1,23 @@
-import os
 from google_auth_oauthlib.flow import Flow
 from firebase_admin import firestore
-from fastapi import Request, HTTPException
+from fastapi import HTTPException
 
-# --- Google OAuth Configuration ---
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
-
-# The scopes required for YouTube Music API access
-YT_SCOPES = ['https://www.googleapis.com/auth/youtube']
+from ..core import config
 
 def create_google_oauth_flow():
     """Creates a Google OAuth Flow instance."""
     return Flow.from_client_config(
         client_config={
             "web": {
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
+                "client_id": config.GOOGLE_CLIENT_ID,
+                "client_secret": config.GOOGLE_CLIENT_SECRET,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [GOOGLE_REDIRECT_URI],
+                "redirect_uris": [config.GOOGLE_REDIRECT_URI],
             }
         },
-        scopes=YT_SCOPES,
-        redirect_uri=GOOGLE_REDIRECT_URI
+        scopes=config.YT_SCOPES,
+        redirect_uri=config.GOOGLE_REDIRECT_URI
     )
 
 def get_google_auth_url():

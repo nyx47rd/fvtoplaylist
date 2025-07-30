@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 import spotipy
 
-from ..main import get_token_from_session, get_spotify_client, TOKEN_INFO_SESSION_KEY
+from ..core.dependencies import get_token_from_session, get_spotify_client
 from . import auth
-from . import client as ytmusic_client
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -14,17 +12,20 @@ templates = Jinja2Templates(directory="templates")
 def get_spotify_user(request: Request) -> dict:
     token_info = get_token_from_session(request)
     if not token_info:
-        # This should ideally redirect to the main login page
         return None
-    sp = get_spotify_client(token_info)
-    return sp.current_user()
+    try:
+        sp = get_spotify_client(token_info)
+        return sp.current_user()
+    except spotipy.exceptions.SpotifyException:
+        # Could be an expired token, but for a dependency, better to just return None
+        return None
 
 
 @router.get("/", response_class=HTMLResponse)
 async def get_ytmusic_page(request: Request, spotify_user: dict = Depends(get_spotify_user)):
     """Renders the main page for the YouTube Music sync feature."""
     if not spotify_user:
-        return RedirectResponse(url="/")
+        return RedirectResponse(url="/?error=spotify_session_expired")
 
     # Check if the user has already linked their Google account
     google_creds = auth.get_credentials_from_firestore(spotify_user['id'])
