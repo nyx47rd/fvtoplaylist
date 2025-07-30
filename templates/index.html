@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Liked Songs Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        .glow-button {
+            box-shadow: 0 0 5px #a78bfa, 0 0 10px #a78bfa, 0 0 15px #a78bfa;
+            transition: all 0.3s ease-in-out;
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 10px #c4b5fd, 0 0 20px #c4b5fd, 0 0 30px #c4b5fd;
+        }
+        .card {
+            background-color: rgba(24, 24, 24, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #4ade80;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #4ade80;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-2xl mx-auto p-8 rounded-xl card text-center">
+        <h1 class="text-3xl font-bold mb-2 text-white">Spotify Liked Songs Sync</h1>
+        <p class="text-violet-300 mb-8">✨ Keep your playlists fresh, automatically. ✨</p>
+
+        {% if user %}
+            <div class="mb-6 flex flex-col items-center">
+                 {% if user.images %}
+                    <img src="{{ user.images[0].url }}" alt="Profile Picture" class="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-violet-400">
+                 {% else %}
+                    <img src="https://placehold.co/100/121212/a78bfa?text={{ user.display_name[0] | upper }}" alt="Profile Picture" class="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-violet-400">
+                 {% endif %}
+                <p class="text-lg">Welcome, <span class="font-bold text-violet-400">{{ user.display_name }}</span>!</p>
+                <a href="/logout" class="text-sm text-gray-400 hover:text-red-500 transition-colors mt-2">Logout</a>
+            </div>
+
+            <!-- Dashboard Content -->
+            <div id="dashboard" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-violet-300">Sync Dashboard</h2>
+                    <!-- Toggle Switch -->
+                    <div class="relative inline-block w-14 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="sync-toggle" class="toggle-checkbox absolute block w-7 h-7 rounded-full bg-white border-4 appearance-none cursor-pointer" onchange="toggleSync()"/>
+                        <label for="sync-toggle" class="toggle-label block overflow-hidden h-7 rounded-full bg-gray-600 cursor-pointer"></label>
+                    </div>
+                </div>
+
+                <div id="status-display" class="space-y-2">
+                    <p>Playlist: <a id="playlist-link" href="#" target="_blank" class="font-mono text-green-400 hover:underline">Not available</a></p>
+                    <p>Status: <span id="status-text" class="font-mono text-green-400">Inactive</span></p>
+                    <p>Total Synced: <span id="synced-count" class="font-mono text-green-400">0</span></p>
+                </div>
+
+                <div id="logs-container" class="mt-4">
+                     <h3 class="font-semibold text-gray-300 mb-2">Live Log:</h3>
+                     <div id="logs" class="h-40 overflow-y-auto bg-gray-900/70 p-3 rounded font-mono text-sm space-y-1">
+                        <!-- Logs will be inserted here -->
+                     </div>
+                </div>
+            </div>
+
+        {% else %}
+            <div>
+                <p class="mb-6">Please log in with your Spotify account to get started.</p>
+                <a href="/login" class="bg-violet-500 hover:bg-violet-600 text-white font-bold py-3 px-6 rounded-lg glow-button">
+                    Login with Spotify
+                </a>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if user %}
+    <script>
+        const statusText = document.getElementById('status-text');
+        const playlistLink = document.getElementById('playlist-link');
+        const syncedCount = document.getElementById('synced-count');
+        const logsDiv = document.getElementById('logs');
+
+        let statusInterval;
+
+        async function toggleSync() {
+            const syncToggle = document.getElementById('sync-toggle');
+            const endpoint = syncToggle.checked ? '/start-sync' : '/stop-sync';
+            try {
+                const response = await fetch(endpoint, { method: 'POST' });
+                if (!response.ok) {
+                    throw new Error(`Failed to ${syncToggle.checked ? 'start' : 'stop'} sync`);
+                }
+                // Immediately fetch status to reflect change
+                fetchStatus();
+            } catch (error) {
+                console.error(error);
+                logsDiv.insertAdjacentHTML('afterbegin', `<p class="text-red-400">Error: ${error.message}</p>`);
+                // Revert toggle on failure
+                if(syncToggle) syncToggle.checked = !syncToggle.checked;
+            }
+        }
+
+        async function fetchStatus() {
+            // If the main dashboard element is gone, we're logged out, so stop polling.
+            const dashboard = document.getElementById('dashboard');
+            if (!dashboard) {
+                clearInterval(statusInterval);
+                return;
+            }
+
+            try {
+                const response = await fetch('/sync-status');
+                const data = await response.json();
+                const syncToggle = document.getElementById('sync-toggle');
+
+                // Update toggle state
+                if(syncToggle) syncToggle.checked = data.is_running;
+
+                // Update dashboard
+                statusText.textContent = data.is_running ? 'Active' : 'Inactive';
+                statusText.className = `font-mono ${data.is_running ? 'text-green-400 animate-pulse' : 'text-gray-400'}`;
+
+                if(data.playlist_url) {
+                    playlistLink.href = data.playlist_url;
+                    playlistLink.textContent = data.playlist_name;
+                } else {
+                    playlistLink.href = '#';
+                    playlistLink.textContent = 'Not created yet';
+                }
+
+                syncedCount.textContent = data.synced_count;
+
+                // Update logs
+                logsDiv.innerHTML = data.logs.map(log => {
+                    let color = 'text-gray-400';
+                    if (log.includes('🔄') || log.includes('Synced')) color = 'text-blue-300';
+                    if (log.includes('✅')) color = 'text-green-300';
+                    if (log.includes('🚨') || log.includes('Error')) color = 'text-red-400';
+                    if (log.includes('🚀') || log.includes('Started')) color = 'text-violet-300';
+                    if (log.includes('🛑') || log.includes('Stopped')) color = 'text-yellow-300';
+                    return `<p class="${color}">${log}</p>`;
+                }).join('');
+
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+                logsDiv.insertAdjacentHTML('afterbegin', `<p class="text-red-400">Could not connect to server.</p>`);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStatus(); // Initial fetch
+            statusInterval = setInterval(fetchStatus, 5000); // Fetch every 5 seconds
+        });
+
+    </script>
+    {% endif %}
+</body>
+</html>
