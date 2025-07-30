@@ -184,7 +184,12 @@ async def shutdown_event():
 # --- FastAPI Routes ---
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
+    logging.info("--- Root route entered ---")
     token_info = get_token_from_session(request)
+    if token_info:
+        logging.info("Token info FOUND in session.")
+    else:
+        logging.info("Token info NOT FOUND in session.")
     user_profile = None
     if token_info:
         oauth_manager = create_spotify_oauth()
@@ -212,12 +217,31 @@ async def login():
 
 @app.get("/callback")
 async def callback(request: Request):
+    logging.info("--- Callback route entered ---")
     code = request.query_params.get("code")
+    if not code:
+        logging.error("Callback error: No authorization code received.")
+        raise HTTPException(status_code=400, detail="Authorization code not found in callback.")
+
+    logging.info(f"Authorization code received: {code[:10]}...") # Log first 10 chars for privacy
+
     try:
-        token_info = create_spotify_oauth().get_access_token(code, check_cache=False)
+        oauth_manager = create_spotify_oauth()
+        logging.info("Attempting to get access token...")
+        token_info = oauth_manager.get_access_token(code, check_cache=False)
+
+        if not token_info:
+            logging.error("Failed to retrieve token info from Spotify.")
+            raise HTTPException(status_code=500, detail="Could not retrieve access token.")
+
+        logging.info("Access token retrieved successfully. Storing in session.")
         request.session[TOKEN_INFO_SESSION_KEY] = token_info
+        logging.info("Token info stored in session. Redirecting to root.")
+
     except Exception as e:
+        logging.error(f"An exception occurred during token exchange: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not retrieve access token: {e}")
+
     return RedirectResponse(url="/")
 
 @app.get("/logout")
