@@ -4,9 +4,9 @@ from fastapi.templating import Jinja2Templates
 import spotipy
 
 from app.core.dependencies import get_token_from_session, get_spotify_client
-from app.spotify import _get_all_playlist_tracks, TARGET_PLAYLIST_NAME
+from app.spotify import TARGET_PLAYLIST_NAME
 from app.ytmusic import auth
-from app.ytmusic import client as ytmusic_client
+from app.ytmusic import api as ytmusic_api
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -72,7 +72,7 @@ async def sync_to_ytmusic(request: Request, spotify_user: dict = Depends(get_spo
         raise HTTPException(status_code=401, detail="Missing credentials for Spotify or Google.")
 
     sp = get_spotify_client(spotify_token_info)
-    ytmusic = ytmusic_client.get_ytmusic_client(google_creds)
+    ytmusic = ytmusic_api.get_ytmusic_client(google_creds)
 
     logs = []
 
@@ -100,7 +100,7 @@ async def sync_to_ytmusic(request: Request, spotify_user: dict = Depends(get_spo
 
         # 4. Find or create the YouTube Music destination playlist
         yt_playlist_name = f"Spotify Liked Songs ({spotify_user['display_name']})"
-        yt_playlist_id = ytmusic_client.find_or_create_ytmusic_playlist(ytmusic, yt_playlist_name, spotify_playlist_description)
+        yt_playlist_id = ytmusic_api.find_or_create_ytmusic_playlist(ytmusic, yt_playlist_name, spotify_playlist_description)
 
         # 5. Search for each song on YT Music and add to a list
         video_ids_to_add = []
@@ -108,7 +108,7 @@ async def sync_to_ytmusic(request: Request, spotify_user: dict = Depends(get_spo
             track = item['track']
             if not track: continue
 
-            video_id = ytmusic_client.search_song_on_ytmusic(ytmusic, track)
+            video_id = ytmusic_api.search_song_on_ytmusic(ytmusic, track)
             if video_id:
                 video_ids_to_add.append(video_id)
                 logs.append(f"Found: {track['name']} → {video_id}")
@@ -116,7 +116,7 @@ async def sync_to_ytmusic(request: Request, spotify_user: dict = Depends(get_spo
                 logs.append(f"Not Found: {track['name']}")
 
         # 6. Add all found tracks to the YT Music playlist
-        ytmusic_client.add_tracks_to_ytmusic_playlist(ytmusic, yt_playlist_id, video_ids_to_add)
+        ytmusic_api.add_tracks_to_ytmusic_playlist(ytmusic, yt_playlist_id, video_ids_to_add)
         logs.append(f"Successfully transferred {len(video_ids_to_add)} songs to YouTube Music playlist '{yt_playlist_name}'.")
 
     except Exception as e:
