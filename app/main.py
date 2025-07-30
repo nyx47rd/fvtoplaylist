@@ -55,14 +55,8 @@ def add_log(log_list: list, message: str):
     log_list.insert(0, f"[{timestamp}] {message}")
 
 def get_spotify_client(token_info: dict) -> spotipy.Spotify:
-    """Initializes a Spotipy client with automatic retries for rate limiting."""
-    return spotipy.Spotify(
-        auth=token_info['access_token'],
-        retries=5,  # Number of retries
-        status_forcelist=(429, 500, 502, 503, 504), # Retry on these status codes
-        status_retries=5,
-        backoff_factor=0.3 # Wait time between retries
-    )
+    """Initializes a Spotipy client."""
+    return spotipy.Spotify(auth=token_info['access_token'])
 
 # --- Core Synchronization Logic ---
 def run_manual_sync(token_info: dict, user_id: str) -> dict:
