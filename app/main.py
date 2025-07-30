@@ -8,7 +8,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from spotipy.oauth2 import SpotifyOAuth
 import spotipy
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import logging
 
 # --- Basic Setup ---
@@ -20,8 +19,8 @@ app = FastAPI()
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("APP_SECRET_KEY", secrets.token_hex(32)),
-    https_only=True,  # Ensures cookies are only sent over HTTPS
-    same_site="lax"   # Recommended for OAuth callbacks and cross-site requests
+    https_only=True,
+    same_site="lax"
 )
 templates = Jinja2Templates(directory="templates")
 
@@ -34,18 +33,9 @@ SCOPES = "user-library-read playlist-modify-public playlist-modify-private"
 TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
 
 # --- In-memory State Management ---
-# This simple state management is suitable for a single-user-per-instance deployment.
-# It will reset if the application restarts.
-sync_status = {
-    "is_running": False,
-    "playlist_name": TARGET_PLAYLIST_NAME,
-    "playlist_id": None,
-    "playlist_url": None,
-    "synced_count": 0,
-    "logs": [],
-}
-active_sync_state = {"token_info": None, "user_id": None, "job": None}
-scheduler = AsyncIOScheduler()
+# This dictionary will hold the sync status for the CURRENT request.
+# It's no longer a long-lived global state.
+sync_status = {}
 
 # --- Helper Functions ---
 def create_spotify_oauth() -> SpotifyOAuth:
@@ -54,64 +44,60 @@ def create_spotify_oauth() -> SpotifyOAuth:
         client_secret=SPOTIPY_CLIENT_SECRET,
         redirect_uri=SPOTIPY_REDIRECT_URI,
         scope=SCOPES,
-        cache_handler=None  # Important for server-side applications
+        cache_handler=None
     )
 
 def get_token_from_session(request: Request) -> dict | None:
     return request.session.get(TOKEN_INFO_SESSION_KEY)
 
-def add_log(message: str):
+def add_log(log_list: list, message: str):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    sync_status["logs"].insert(0, f"[{timestamp}] {message}")
-    # Keep logs from growing indefinitely
-    sync_status["logs"] = sync_status["logs"][:50]
+    log_list.insert(0, f"[{timestamp}] {message}")
+
+def get_spotify_client(token_info: dict) -> spotipy.Spotify:
+    """Initializes a Spotipy client with automatic retries for rate limiting."""
+    return spotipy.Spotify(
+        auth=token_info['access_token'],
+        retries=5,  # Number of retries
+        status_forcelist=(429, 500, 502, 503, 504), # Retry on these status codes
+        status_retries=5,
+        backoff_factor=0.3 # Wait time between retries
+    )
 
 # --- Core Synchronization Logic ---
-async def sync_job():
-    """The main background job to sync liked songs."""
-    if not active_sync_state.get("token_info"):
-        logging.warning("Sync job running without token info. Skipping.")
-        return
+def run_manual_sync(token_info: dict, user_id: str) -> dict:
+    """The main function to sync liked songs. Returns a status dictionary."""
 
-    oauth_manager = create_spotify_oauth()
-    token_info = active_sync_state["token_info"]
+    local_sync_status = {
+        "playlist_name": TARGET_PLAYLIST_NAME,
+        "playlist_id": None,
+        "playlist_url": None,
+        "synced_count": 0,
+        "logs": [],
+    }
+    logs = local_sync_status["logs"]
 
-    # Refresh token if needed and update the global state
-    if oauth_manager.is_token_expired(token_info):
-        try:
-            token_info = oauth_manager.refresh_access_token(token_info['refresh_token'])
-            active_sync_state["token_info"] = token_info
-            add_log("🔑 Token refreshed successfully.")
-        except Exception as e:
-            add_log(f"🚨 Error refreshing token: {e}")
-            # Stop the sync if token refresh fails
-            await stop_sync_task()
-            return
-
-    sp = spotipy.Spotify(auth=token_info['access_token'])
+    add_log(logs, "🚀 Manual sync process started.")
+    sp = get_spotify_client(token_info)
 
     try:
         # 1. Find or Create Playlist
-        playlist_id = sync_status.get("playlist_id")
-        if not playlist_id:
-            user_id = active_sync_state["user_id"]
-            playlists = sp.user_playlists(user_id)
-            for p in playlists['items']:
-                if p['name'] == TARGET_PLAYLIST_NAME:
-                    sync_status["playlist_id"] = p['id']
-                    sync_status["playlist_url"] = p['external_urls']['spotify']
-                    add_log(f"✅ Found existing playlist: '{TARGET_PLAYLIST_NAME}'")
-                    break
-            if not sync_status.get("playlist_id"):
-                playlist = sp.user_playlist_create(user_id, TARGET_PLAYLIST_NAME, public=True)
-                sync_status["playlist_id"] = playlist['id']
-                sync_status["playlist_url"] = playlist['external_urls']['spotify']
-                add_log(f"✅ Created new playlist: '{TARGET_PLAYLIST_NAME}'")
+        playlists = sp.user_playlists(user_id)
+        for p in playlists['items']:
+            if p['name'] == TARGET_PLAYLIST_NAME:
+                local_sync_status["playlist_id"] = p['id']
+                local_sync_status["playlist_url"] = p['external_urls']['spotify']
+                break
+        if not local_sync_status.get("playlist_id"):
+            playlist = sp.user_playlist_create(user_id, TARGET_PLAYLIST_NAME, public=True)
+            local_sync_status["playlist_id"] = playlist['id']
+            local_sync_status["playlist_url"] = playlist['external_urls']['spotify']
+            add_log(logs, f"✅ Created new playlist: '{TARGET_PLAYLIST_NAME}'")
 
-        playlist_id = sync_status["playlist_id"]
+        playlist_id = local_sync_status["playlist_id"]
 
         # 2. Get All Liked Songs (with pagination)
-        add_log("Fetching all liked songs...")
+        add_log(logs, "Fetching all liked songs...")
         liked_tracks = {}
         results = sp.current_user_saved_tracks(limit=50)
         while results:
@@ -122,10 +108,10 @@ async def sync_job():
                 results = sp.next(results)
             else:
                 results = None
-        add_log(f"Found a total of {len(liked_tracks)} liked songs.")
+        add_log(logs, f"Found a total of {len(liked_tracks)} liked songs.")
 
         # 3. Get All Playlist Tracks (with pagination)
-        add_log("Fetching all tracks from target playlist...")
+        add_log(logs, "Fetching all tracks from target playlist...")
         playlist_track_ids = set()
         results = sp.playlist_items(playlist_id, fields='items(track(id)),next')
         while results:
@@ -136,98 +122,47 @@ async def sync_job():
                 results = sp.next(results)
             else:
                 results = None
-        add_log(f"Playlist currently contains {len(playlist_track_ids)} songs.")
+        add_log(logs, f"Playlist currently contains {len(playlist_track_ids)} songs.")
 
-        # 4. Find New Songs to Add
-        new_track_ids = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
+        # 4. Find New Songs to Add (in reverse order to maintain newest first)
+        new_track_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
 
         # 5. Add New Songs
-        if new_track_ids:
-            sp.playlist_add_items(playlist_id, new_track_ids, position=0)
-            sync_status["synced_count"] += len(new_track_ids)
-            add_log(f"🔄 Synced {len(new_track_ids)} new song(s).")
+        if new_track_uris:
+            # Spotify API adds multiple tracks in the order they are provided.
+            # To maintain "newest first", we add them in chunks of 100.
+            add_log(logs, f"Adding {len(new_track_uris)} new song(s) to the playlist...")
+            for i in range(0, len(new_track_uris), 100):
+                chunk = new_track_uris[i:i + 100]
+                sp.playlist_add_items(playlist_id, chunk, position=0)
+            local_sync_status["synced_count"] = len(new_track_uris)
+            add_log(logs, f"✅ Successfully synced {len(new_track_uris)} new song(s).")
         else:
-            add_log("✅ No new liked songs to sync.")
+            add_log(logs, "✅ Playlist is already up-to-date. No new songs to sync.")
 
     except spotipy.exceptions.SpotifyException as e:
-        add_log(f"🚨 Spotify API Error: {e}")
+        add_log(logs, f"🚨 Spotify API Error: {e.msg}")
     except Exception as e:
-        add_log(f"🚨 An unexpected error occurred: {e}")
+        add_log(logs, f"🚨 An unexpected error occurred: {e}")
 
-
-# --- Scheduler Control ---
-async def start_sync_task(request: Request):
-    token_info = get_token_from_session(request)
-    if not token_info:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    if not sync_status["is_running"]:
-        sp = spotipy.Spotify(auth=token_info['access_token'])
-        user_profile = sp.current_user()
-
-        active_sync_state["token_info"] = token_info
-        active_sync_state["user_id"] = user_profile['id']
-
-        # Add the job to the scheduler
-        active_sync_state["job"] = scheduler.add_job(sync_job, 'interval', seconds=15, id='sync_job')
-        sync_status["is_running"] = True
-        add_log("🚀 Sync process started.")
-        # Perform an initial sync immediately
-        await sync_job()
-
-async def stop_sync_task():
-    if sync_status["is_running"]:
-        if active_sync_state.get("job"):
-            active_sync_state["job"].remove()
-            active_sync_state["job"] = None
-
-        # Reset state
-        sync_status["is_running"] = False
-        sync_status["playlist_id"] = None
-        sync_status["playlist_url"] = None
-        active_sync_state["token_info"] = None
-        active_sync_state["user_id"] = None
-        add_log("🛑 Sync process stopped.")
-
-@app.on_event("startup")
-async def startup_event():
-    scheduler.start()
-    add_log("Scheduler started.")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await stop_sync_task()
-    scheduler.shutdown()
-    logging.info("Scheduler shut down.")
-
+    return local_sync_status
 
 # --- FastAPI Routes ---
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    logging.info("--- Root route entered ---")
     token_info = get_token_from_session(request)
-    if token_info:
-        logging.info("Token info FOUND in session.")
-    else:
-        logging.info("Token info NOT FOUND in session.")
     user_profile = None
     if token_info:
-        oauth_manager = create_spotify_oauth()
-        # Ensure token is fresh before rendering the page
-        if oauth_manager.is_token_expired(token_info):
-            try:
-                token_info = oauth_manager.refresh_access_token(token_info['refresh_token'])
-                request.session[TOKEN_INFO_SESSION_KEY] = token_info
-            except Exception:
-                # If refresh fails, clear session and force re-login
-                request.session.clear()
-                return RedirectResponse(url="/")
-
-        sp = spotipy.Spotify(auth=token_info['access_token'])
-        user_profile = sp.current_user()
+        sp = get_spotify_client(token_info)
+        try:
+            user_profile = sp.current_user()
+        except spotipy.exceptions.SpotifyException:
+             # Invalid token, clear session and force re-login
+            request.session.clear()
+            return RedirectResponse(url="/")
 
     return templates.TemplateResponse(
-        "index.html", {"request": request, "user": user_profile, "sync_status": sync_status}
+        "index.html", {"request": request, "user": user_profile}
     )
 
 @app.get("/login")
@@ -237,49 +172,37 @@ async def login():
 
 @app.get("/callback")
 async def callback(request: Request):
-    logging.info("--- Callback route entered ---")
-    code = request.query_params.get("code")
-    if not code:
-        logging.error("Callback error: No authorization code received.")
-        raise HTTPException(status_code=400, detail="Authorization code not found in callback.")
-
-    logging.info(f"Authorization code received: {code[:10]}...") # Log first 10 chars for privacy
-
     try:
-        oauth_manager = create_spotify_oauth()
-        logging.info("Attempting to get access token...")
-        token_info = oauth_manager.get_access_token(code, check_cache=False)
-
-        if not token_info:
-            logging.error("Failed to retrieve token info from Spotify.")
-            raise HTTPException(status_code=500, detail="Could not retrieve access token.")
-
-        logging.info("Access token retrieved successfully. Storing in session.")
+        token_info = create_spotify_oauth().get_access_token(code=request.query_params.get("code"), check_cache=False)
         request.session[TOKEN_INFO_SESSION_KEY] = token_info
-        logging.info("Token info stored in session. Redirecting to root.")
-
     except Exception as e:
-        logging.error(f"An exception occurred during token exchange: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not retrieve access token: {e}")
-
     return RedirectResponse(url="/")
 
 @app.get("/logout")
 async def logout(request: Request):
     request.session.clear()
-    await stop_sync_task() # Stop sync on logout
     return RedirectResponse(url="/")
 
-@app.post("/start-sync")
-async def start_sync_endpoint(request: Request):
-    await start_sync_task(request)
-    return JSONResponse({"message": "Sync started."})
+@app.post("/sync-now")
+async def sync_now_endpoint(request: Request):
+    token_info = get_token_from_session(request)
+    if not token_info:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-@app.post("/stop-sync")
-async def stop_sync_endpoint():
-    await stop_sync_task()
-    return JSONResponse({"message": "Sync stopped."})
+    # Refresh token if needed
+    oauth_manager = create_spotify_oauth()
+    if oauth_manager.is_token_expired(token_info):
+        try:
+            token_info = oauth_manager.refresh_access_token(token_info['refresh_token'])
+            request.session[TOKEN_INFO_SESSION_KEY] = token_info
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Could not refresh token: {e}")
 
-@app.get("/sync-status")
-async def get_sync_status():
-    return JSONResponse(sync_status)
+    sp = get_spotify_client(token_info)
+    user_profile = sp.current_user()
+
+    # Run the sync process and get the results
+    sync_result = run_manual_sync(token_info, user_profile['id'])
+
+    return JSONResponse(sync_result)

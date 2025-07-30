@@ -4,5 +4,4 @@ gunicorn
 jinja2
 python-dotenv
 spotipy
-apscheduler
 itsdangerous
