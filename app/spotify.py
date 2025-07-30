@@ -1,6 +1,8 @@
 import spotipy
 import datetime
 
+from ..core import config
+
 # Moved from main.py to resolve circular import
 TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
 
