@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 import spotipy
 
 from app.core.dependencies import get_token_from_session, get_spotify_client
