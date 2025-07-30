@@ -9,17 +9,8 @@ def get_ytmusic_client(google_creds: dict) -> YTMusic:
     Initializes the YTMusic client using credentials stored in Firestore.
     The credentials dictionary must be converted to a google.oauth2.credentials.Credentials object.
     """
-    # The google-auth library expects specific keys. We map our stored creds to them.
-    credentials = Credentials(
-        token=google_creds['token'],
-        refresh_token=google_creds['refresh_token'],
-        token_uri=google_creds['token_uri'],
-        client_id=google_creds['client_id'],
-        client_secret=google_creds['client_secret'],
-        scopes=google_creds['scopes']
-    )
     # The YTMusic library can be initialized with these credentials
-    return YTMusic(auth=credentials)
+    return YTMusic(auth=google_creds)
 
 def search_song_on_ytmusic(ytmusic: YTMusic, spotify_track: dict) -> str | None:
     """
