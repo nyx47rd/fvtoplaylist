@@ -12,13 +12,33 @@ import logging
 
 # Import the refactored sync logic
 from .spotify import run_sync_logic
+from .ytmusic import routes as ytmusic_routes
+import firebase_admin
+from firebase_admin import credentials
+import json
 
 # --- Basic Setup ---
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- Firebase Initialization ---
+try:
+    firebase_cred_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+    if firebase_cred_json:
+        cred_dict = json.loads(firebase_cred_json)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        logging.info("Firebase initialized successfully.")
+    else:
+        logging.warning("FIREBASE_SERVICE_ACCOUNT_JSON not found. Firebase features will be disabled.")
+except Exception as e:
+    logging.error(f"Failed to initialize Firebase: {e}")
+
 # --- FastAPI App Initialization ---
 app = FastAPI()
+
+# Include the new router for YouTube Music endpoints
+app.include_router(ytmusic_routes.router, prefix="/ytmusic", tags=["YouTube Music"])
 
 # Session Middleware Setup
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY")
