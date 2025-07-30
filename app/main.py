@@ -129,12 +129,14 @@ def run_manual_sync(token_info: dict, user_id: str) -> dict:
 
         # 5. Add New Songs
         if new_track_uris:
-            # Spotify API adds multiple tracks in the order they are provided.
-            # To maintain "newest first", we add them in chunks of 100.
+            # To preserve the correct "newest first" order when adding more than 100 songs,
+            # we chunk the list and add the chunks in reverse order.
             add_log(logs, f"Adding {len(new_track_uris)} new song(s) to the playlist...")
-            for i in range(0, len(new_track_uris), 100):
-                chunk = new_track_uris[i:i + 100]
+
+            chunks = [new_track_uris[i:i + 100] for i in range(0, len(new_track_uris), 100)]
+            for chunk in reversed(chunks):
                 sp.playlist_add_items(playlist_id, chunk, position=0)
+
             local_sync_status["synced_count"] = len(new_track_uris)
             add_log(logs, f"✅ Successfully synced {len(new_track_uris)} new song(s).")
         else:
