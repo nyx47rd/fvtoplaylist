@@ -16,7 +16,6 @@ from .spotify import run_sync_logic
 # --- Basic Setup ---
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨" # Keep it here for now or move to a config file
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
@@ -65,11 +64,6 @@ def get_token_from_session(request: Request) -> dict | None:
 def get_spotify_client(token_info: dict) -> spotipy.Spotify:
     """Initializes a Spotipy client."""
     return spotipy.Spotify(auth=token_info['access_token'])
-
-def add_log(log_list: list, message: str):
-    """A helper function to add a timestamped log message."""
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    log_list.insert(0, f"[{timestamp}] {message}")
 
 # --- FastAPI Routes ---
 @app.get("/", response_class=HTMLResponse)
