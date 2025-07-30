@@ -10,10 +10,10 @@ import spotipy
 import firebase_admin
 from firebase_admin import credentials
 
-from .core import config
-from .core.dependencies import create_spotify_oauth, get_token_from_session, get_spotify_client
-from .spotify import run_sync_logic
-from .ytmusic import routes as ytmusic_routes
+from app.core import config
+from app.core.dependencies import create_spotify_oauth, get_token_from_session, get_spotify_client
+from app.spotify import run_sync_logic
+from app.ytmusic import routes as ytmusic_routes
 
 # --- Basic Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

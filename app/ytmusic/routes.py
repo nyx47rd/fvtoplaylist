@@ -2,8 +2,8 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 import spotipy
 
-from ..core.dependencies import get_token_from_session, get_spotify_client
-from . import auth
+from app.core.dependencies import get_token_from_session, get_spotify_client
+from app.ytmusic import auth
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")

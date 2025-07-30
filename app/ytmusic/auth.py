@@ -2,7 +2,7 @@ from google_auth_oauthlib.flow import Flow
 from firebase_admin import firestore
 from fastapi import HTTPException
 
-from ..core import config
+from app.core import config
 
 def create_google_oauth_flow():
     """Creates a Google OAuth Flow instance."""
