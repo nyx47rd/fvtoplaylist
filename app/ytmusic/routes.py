@@ -26,7 +26,8 @@ def get_spotify_user(request: Request) -> dict:
 async def get_ytmusic_page(request: Request, spotify_user: dict = Depends(get_spotify_user)):
     """Renders the main page for the YouTube Music sync feature."""
     if not spotify_user:
-        return RedirectResponse(url="/?error=spotify_session_expired")
+        # If no spotify session, redirect to the main login page to start the flow.
+        return RedirectResponse(url="/login")
 
     # Check if the user has already linked their Google account
     google_creds = auth.get_credentials_from_firestore(spotify_user['id'])

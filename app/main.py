@@ -34,7 +34,7 @@ except Exception as e:
 app = FastAPI()
 
 # Include the YouTube Music router
-app.include_router(ytmusic_routes.router)
+app.include_router(ytmusic_routes.router, prefix="/ytmusic", tags=["YouTube Music"])
 
 # Session Middleware Setup
 if not config.APP_SECRET_KEY:
