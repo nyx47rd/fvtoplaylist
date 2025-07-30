@@ -18,7 +18,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- FastAPI App Initialization ---
 app = FastAPI()
 app.add_middleware(
-    SessionMiddleware, secret_key=os.getenv("APP_SECRET_KEY", secrets.token_hex(32))
+    SessionMiddleware,
+    secret_key=os.getenv("APP_SECRET_KEY", secrets.token_hex(32)),
+    https_only=True,  # Ensures cookies are only sent over HTTPS
+    same_site="lax"   # Recommended for OAuth callbacks and cross-site requests
 )
 templates = Jinja2Templates(directory="templates")
 
