@@ -110,13 +110,33 @@ async def sync_job():
 
         playlist_id = sync_status["playlist_id"]
 
-        # 2. Get Liked Songs
+        # 2. Get All Liked Songs (with pagination)
+        add_log("Fetching all liked songs...")
+        liked_tracks = {}
         results = sp.current_user_saved_tracks(limit=50)
-        liked_tracks = {item['track']['id']: item['track']['uri'] for item in results['items']}
+        while results:
+            for item in results['items']:
+                if item.get('track') and item['track'].get('id'):
+                    liked_tracks[item['track']['id']] = item['track']['uri']
+            if results['next']:
+                results = sp.next(results)
+            else:
+                results = None
+        add_log(f"Found a total of {len(liked_tracks)} liked songs.")
 
-        # 3. Get Playlist Tracks
-        playlist_items = sp.playlist_items(playlist_id, fields='items(track(id))')
-        playlist_track_ids = {item['track']['id'] for item in playlist_items['items'] if item.get('track')}
+        # 3. Get All Playlist Tracks (with pagination)
+        add_log("Fetching all tracks from target playlist...")
+        playlist_track_ids = set()
+        results = sp.playlist_items(playlist_id, fields='items(track(id)),next')
+        while results:
+            for item in results['items']:
+                if item.get('track') and item['track'].get('id'):
+                    playlist_track_ids.add(item['track']['id'])
+            if results['next']:
+                results = sp.next(results)
+            else:
+                results = None
+        add_log(f"Playlist currently contains {len(playlist_track_ids)} songs.")
 
         # 4. Find New Songs to Add
         new_track_ids = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
