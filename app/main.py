@@ -10,9 +10,13 @@ import spotipy
 from dotenv import load_dotenv
 import logging
 
+# Import the refactored sync logic
+from .spotify import run_sync_logic
+
 # --- Basic Setup ---
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨" # Keep it here for now or move to a config file
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
@@ -44,12 +48,6 @@ SPOTIPY_CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
 SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 TOKEN_INFO_SESSION_KEY = "spotify_token_info"
 SCOPES = "user-library-read playlist-modify-public playlist-modify-private"
-TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
-
-# --- In-memory State Management ---
-# This dictionary will hold the sync status for the CURRENT request.
-# It's no longer a long-lived global state.
-sync_status = {}
 
 # --- Helper Functions ---
 def create_spotify_oauth() -> SpotifyOAuth:
@@ -64,109 +62,14 @@ def create_spotify_oauth() -> SpotifyOAuth:
 def get_token_from_session(request: Request) -> dict | None:
     return request.session.get(TOKEN_INFO_SESSION_KEY)
 
-def add_log(log_list: list, message: str):
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    log_list.insert(0, f"[{timestamp}] {message}")
-
 def get_spotify_client(token_info: dict) -> spotipy.Spotify:
     """Initializes a Spotipy client."""
     return spotipy.Spotify(auth=token_info['access_token'])
 
-# --- Core Synchronization Logic ---
-def run_manual_sync(token_info: dict, user_id: str) -> dict:
-    """The main function to sync liked songs. Returns a status dictionary."""
-
-    local_sync_status = {
-        "playlist_name": TARGET_PLAYLIST_NAME,
-        "playlist_id": None,
-        "playlist_url": None,
-        "synced_count": 0,
-        "logs": [],
-    }
-    logs = local_sync_status["logs"]
-
-    add_log(logs, "🚀 Manual sync process started.")
-    sp = get_spotify_client(token_info)
-
-    try:
-        # 1. Find or Create Playlist
-        playlists = sp.user_playlists(user_id)
-        for p in playlists['items']:
-            if p['name'] == TARGET_PLAYLIST_NAME:
-                local_sync_status["playlist_id"] = p['id']
-                local_sync_status["playlist_url"] = p['external_urls']['spotify']
-                break
-        if not local_sync_status.get("playlist_id"):
-            playlist = sp.user_playlist_create(user_id, TARGET_PLAYLIST_NAME, public=True)
-            local_sync_status["playlist_id"] = playlist['id']
-            local_sync_status["playlist_url"] = playlist['external_urls']['spotify']
-            add_log(logs, f"✅ Created new playlist: '{TARGET_PLAYLIST_NAME}'")
-
-        playlist_id = local_sync_status["playlist_id"]
-
-        # 2. Get All Liked Songs (with pagination)
-        add_log(logs, "Fetching all liked songs...")
-        liked_tracks = {}
-        results = sp.current_user_saved_tracks(limit=50)
-        while results:
-            for item in results['items']:
-                if item.get('track') and item['track'].get('id'):
-                    liked_tracks[item['track']['id']] = item['track']['uri']
-            if results['next']:
-                results = sp.next(results)
-            else:
-                results = None
-        add_log(logs, f"Found a total of {len(liked_tracks)} liked songs.")
-
-        # 3. Get All Playlist Tracks (with pagination)
-        add_log(logs, "Fetching all tracks from target playlist...")
-        playlist_track_ids = set()
-        results = sp.playlist_items(playlist_id, fields='items(track(id)),next')
-        while results:
-            for item in results['items']:
-                if item.get('track') and item['track'].get('id'):
-                    playlist_track_ids.add(item['track']['id'])
-            if results['next']:
-                results = sp.next(results)
-            else:
-                results = None
-        add_log(logs, f"Playlist currently contains {len(playlist_track_ids)} songs.")
-
-        # 4. Determine songs to add and remove
-        liked_track_ids = liked_tracks.keys()
-        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
-        tracks_to_remove_ids = list(playlist_track_ids - liked_track_ids)
-
-        # 5. Remove songs that are no longer liked
-        if tracks_to_remove_ids:
-            add_log(logs, f"Removing {len(tracks_to_remove_ids)} song(s) that are no longer liked...")
-            # Spotify API can remove 100 tracks at a time
-            for i in range(0, len(tracks_to_remove_ids), 100):
-                chunk = tracks_to_remove_ids[i:i + 100]
-                sp.playlist_remove_all_occurrences_of_items(playlist_id, chunk)
-            add_log(logs, f"🗑️ Successfully removed {len(tracks_to_remove_ids)} song(s).")
-
-        # 6. Add new liked songs
-        if tracks_to_add_uris:
-            # To preserve the correct "newest first" order when adding more than 100 songs,
-            # we chunk the list and add the chunks in reverse order.
-            add_log(logs, f"Adding {len(tracks_to_add_uris)} new song(s) to the playlist...")
-
-            chunks = [tracks_to_add_uris[i:i + 100] for i in range(0, len(tracks_to_add_uris), 100)]
-            for chunk in reversed(chunks):
-                sp.playlist_add_items(playlist_id, chunk, position=0)
-
-            local_sync_status["synced_count"] = len(tracks_to_add_uris)
-            add_log(logs, f"✅ Successfully synced {len(tracks_to_add_uris)} new song(s).")
-        else:
-            add_log(logs, "✅ Playlist is already up-to-date. No new songs to sync.")
-
-    except spotipy.exceptions.SpotifyException as e:
-        add_log(logs, f"🚨 Spotify API Error: {e.msg}")
-    except Exception as e:
-        add_log(logs, f"🚨 An unexpected error occurred: {e}")
-
-    return local_sync_status
+def add_log(log_list: list, message: str):
+    """A helper function to add a timestamped log message."""
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    log_list.insert(0, f"[{timestamp}] {message}")
 
 # --- FastAPI Routes ---
 @app.get("/", response_class=HTMLResponse)
@@ -178,7 +81,6 @@ async def root(request: Request):
         try:
             user_profile = sp.current_user()
         except spotipy.exceptions.SpotifyException:
-             # Invalid token, clear session and force re-login
             request.session.clear()
             return RedirectResponse(url="/")
 
@@ -211,7 +113,6 @@ async def sync_now_endpoint(request: Request):
     if not token_info:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    # Refresh token if needed
     oauth_manager = create_spotify_oauth()
     if oauth_manager.is_token_expired(token_info):
         try:
@@ -223,7 +124,7 @@ async def sync_now_endpoint(request: Request):
     sp = get_spotify_client(token_info)
     user_profile = sp.current_user()
 
-    # Run the sync process and get the results
-    sync_result = run_manual_sync(token_info, user_profile['id'])
+    # Call the refactored sync logic
+    sync_result = run_sync_logic(sp, user_profile['id'])
 
     return JSONResponse(sync_result)
