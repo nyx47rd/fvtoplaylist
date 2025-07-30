@@ -1,5 +1,13 @@
 import spotipy
-from .main import add_log, TARGET_PLAYLIST_NAME
+import datetime
+
+# Moved from main.py to resolve circular import
+TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
+
+def add_log(log_list: list, message: str):
+    """A helper function to add a timestamped log message."""
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    log_list.insert(0, f"[{timestamp}] {message}")
 
 def _find_or_create_playlist(sp: spotipy.Spotify, user_id: str, logs: list) -> tuple[str | None, str | None]:
     """Finds the target playlist by name, or creates it if it doesn't exist."""
