@@ -16,9 +16,23 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- FastAPI App Initialization ---
 app = FastAPI()
+
+# Session Middleware Setup
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY")
+if not APP_SECRET_KEY:
+    APP_SECRET_KEY = secrets.token_hex(32)
+    logging.warning(
+        "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+        "!!! WARNING: APP_SECRET_KEY is not set in the environment. !!!\n"
+        "!!! Using a temporary secret key.                            !!!\n"
+        "!!! Sessions will NOT persist across application restarts.   !!!\n"
+        "!!! Set APP_SECRET_KEY in your .env file or environment.     !!!\n"
+        "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    )
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("APP_SECRET_KEY", secrets.token_hex(32)),
+    secret_key=APP_SECRET_KEY,
     https_only=True,
     same_site="lax"
 )
