@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        .card {
+            background-color: rgba(24, 24, 24, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        h1 {
+            font-size: 2.25rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+        a {
+            color: #a78bfa;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-4xl mx-auto p-8 rounded-xl card">
+        <h1>Privacy Policy for Spotify-YT-Sync</h1>
+        <p><strong>Last Updated:</strong> July 30, 2025</p>
+
+        <h2>1. Introduction</h2>
+        <p>Welcome to Spotify-YT-Sync ("we," "our," or "us"). This application helps you synchronize your Spotify liked songs to a playlist and transfer it to YouTube Music. Your privacy is important to us. This Privacy Policy explains how we handle your information when you use our service.</p>
+
+        <h2>2. Information We Use</h2>
+        <p>To provide our service, we require access to certain information from your Spotify and Google (YouTube) accounts. We only request the minimum permissions necessary to perform the requested actions.</p>
+        <ul>
+            <li><strong>Spotify Data:</strong> We access your user profile (username, profile picture) to personalize the interface. We access your liked songs and playlists to perform the synchronization and transfer as requested by you. We do not store your Spotify password. Authentication is handled securely via Spotify's OAuth 2.0 protocol.</li>
+            <li><strong>Google (YouTube) Data:</strong> We require permission to manage your YouTube account (`https://www.googleapis.com/auth/youtube`). This permission is used solely to create a playlist and add songs to it on your behalf when you initiate a transfer. We do not access or store any other Google data.</li>
+        </ul>
+
+        <h2>3. How We Store Your Information</h2>
+        <p>We use Firebase Firestore to securely store the authentication tokens (OAuth credentials) required to communicate with Spotify and Google APIs on your behalf. Your Spotify user ID is used as a key to link your Spotify and Google credentials. We do not store any personal data beyond these authorization tokens.</p>
+        <p>Your password for any service is never seen, handled, or stored by our application.</p>
+
+        <h2>4. How We Use Your Information</h2>
+        <p>Your information and the permissions you grant are used exclusively for the following purposes:</p>
+        <ul>
+            <li>To display your username and profile picture on the dashboard.</li>
+            <li>To fetch your liked songs from Spotify.</li>
+            <li>To create and modify a specific playlist in your Spotify account named "Liked Songs Sync ✨".</li>
+            <li>To create a new playlist in your YouTube Music account.</li>
+            <li>To search for songs on YouTube Music and add them to the created playlist.</li>
+        </ul>
+        <p>We will not share, sell, or transfer your information to any third parties. Your data is only used to provide the core functionality of this application as initiated by you.</p>
+
+        <h2>5. Data Deletion</h2>
+        <p>The authentication tokens stored in our database are essential for the app to function. If you wish to revoke access and delete your stored tokens, you can do so by visiting your Spotify and Google account settings and removing this application's access. This will automatically render the stored tokens invalid.</p>
+
+        <h2>6. Contact Us</h2>
+        <p>If you have any questions about this Privacy Policy, please contact us at [Your Contact Email or GitHub Repo Link].</p>
+    </div>
+</body>
+</html>

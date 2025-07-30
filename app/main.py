@@ -54,6 +54,12 @@ app.add_middleware(
 templates = Jinja2Templates(directory="templates")
 
 # --- FastAPI Routes ---
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy(request: Request):
+    """Renders the privacy policy page."""
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     token_info = get_token_from_session(request)
