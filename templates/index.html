@@ -65,17 +65,20 @@
                 </div>
             </div>
 
-            <!-- Deletion Section -->
-            <div id="delete-section" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6 mt-4" style="display: none;">
-                <h2 class="text-xl font-bold text-amber-300 mb-4">Delete Songs</h2>
-                <div class="flex items-center space-x-4">
-                    <input type="number" id="delete-count" min="1" placeholder="Number of songs" class="bg-gray-700 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400">
+            <!-- Actions Section -->
+            <div id="actions-section" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6 mt-4" style="display: none;">
+                <h2 class="text-xl font-bold text-amber-300 mb-4">Playlist Actions</h2>
+                <div class="flex items-center space-x-4 mb-4">
+                    <input type="number" id="delete-count" min="1" placeholder="Number of songs" class="bg-gray-700 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400 w-48">
                     <button id="delete-button" onclick="deleteSongs()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed">
                         Delete Last Songs
                     </button>
-                    <button id="undo-button" onclick="undoDelete()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg" style="display: none;">
-                        Undo
-                    </button>
+                </div>
+                <div class="border-t border-gray-700 my-4"></div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="ignore-deleted-checkbox" class="h-4 w-4 bg-gray-700 border-gray-600 text-violet-500 focus:ring-violet-600 rounded">
+                    <label for="ignore-deleted-checkbox" class="ml-2 text-sm font-medium text-gray-300">Do not re-add songs I have deleted</label>
+                    <button onclick="clearIgnoredSongs()" class="ml-auto text-xs text-gray-400 hover:text-red-500 underline">Clear Ignored List</button>
                 </div>
             </div>
 
@@ -94,13 +97,31 @@
         const syncButton = document.getElementById('sync-button');
         const playlistLink = document.getElementById('playlist-link');
         const logsDiv = document.getElementById('logs');
-        const deleteSection = document.getElementById('delete-section');
+        const actionsSection = document.getElementById('actions-section');
         const deleteButton = document.getElementById('delete-button');
         const deleteCountInput = document.getElementById('delete-count');
-        const undoButton = document.getElementById('undo-button');
+        const ignoreCheckbox = document.getElementById('ignore-deleted-checkbox');
 
         let currentPlaylistId = null;
+        const IGNORED_SONGS_KEY = 'ignoredSpotifyTrackIds';
 
+        // --- LocalStorage Functions ---
+        function getIgnoredSongs() {
+            return JSON.parse(localStorage.getItem(IGNORED_SONGS_KEY) || '[]');
+        }
+
+        function addIgnoredSongs(trackIds) {
+            const ignored = new Set(getIgnoredSongs());
+            trackIds.forEach(id => ignored.add(id));
+            localStorage.setItem(IGNORED_SONGS_KEY, JSON.stringify([...ignored]));
+        }
+
+        function clearIgnoredSongs() {
+            localStorage.removeItem(IGNORED_SONGS_KEY);
+            updateLogs(['✅ Cleared the list of ignored songs.'], true);
+        }
+
+        // --- UI Update Functions ---
         function updateLogs(newLogs, clear = false) {
             if (!Array.isArray(newLogs)) return;
             const newLogHtml = newLogs.map(log => {
@@ -109,7 +130,7 @@
                 if (log.includes('✅') || log.includes('Successfully')) color = 'text-green-300';
                 if (log.includes('🚨') || log.includes('Error') || log.includes('Cannot')) color = 'text-red-400';
                 if (log.includes('🚀') || log.includes('started')) color = 'text-violet-300';
-                if (log.includes('deleted') || log.includes('Logged')) color = 'text-amber-300';
+                if (log.includes('deleted') || log.includes('Ignoring')) color = 'text-amber-300';
                 return `<p class="${color}">${log}</p>`;
             }).join('');
 
@@ -120,14 +141,23 @@
             }
         }
 
+        // --- API Call Functions ---
         async function startSync() {
             syncButton.disabled = true;
             syncButton.textContent = 'Syncing...';
             updateLogs(['🚀 Initiating sync...'], true);
-            undoButton.style.display = 'none';
+
+            let ignored_track_ids = [];
+            if (ignoreCheckbox.checked) {
+                ignored_track_ids = getIgnoredSongs();
+            }
 
             try {
-                const response = await fetch('/sync-now', { method: 'POST' });
+                const response = await fetch('/sync-now', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ignored_track_ids })
+                });
                 const data = await response.json();
 
                 if (!response.ok) {
@@ -140,11 +170,11 @@
                     currentPlaylistId = data.playlist_id;
                     playlistLink.href = data.playlist_url;
                     playlistLink.textContent = data.playlist_name;
-                    deleteSection.style.display = 'block';
+                    actionsSection.style.display = 'block';
                 } else {
                     playlistLink.href = '#';
                     playlistLink.textContent = 'Could not find or create playlist.';
-                    deleteSection.style.display = 'none';
+                    actionsSection.style.display = 'none';
                 }
 
             } catch (error) {
@@ -165,7 +195,6 @@
 
             deleteButton.disabled = true;
             deleteButton.textContent = 'Deleting...';
-            undoButton.style.display = 'none';
 
             try {
                 const response = await fetch('/delete-songs', {
@@ -184,8 +213,9 @@
                     throw new Error(data.log.join('; ') || 'Failed to delete songs.');
                 }
 
-                if (data.success) {
-                    undoButton.style.display = 'inline-block';
+                if (data.deleted_track_ids) {
+                    addIgnoredSongs(data.deleted_track_ids);
+                    updateLogs([`✅ Added ${data.deleted_track_ids.length} song(s) to the ignored list.`]);
                 }
 
             } catch (error) {
@@ -195,36 +225,6 @@
                 deleteButton.disabled = false;
                 deleteButton.textContent = 'Delete Last Songs';
                 deleteCountInput.value = '';
-            }
-        }
-
-        async function undoDelete() {
-            if (!currentPlaylistId) return;
-
-            undoButton.disabled = true;
-            undoButton.textContent = 'Undoing...';
-
-            try {
-                const response = await fetch('/undo-delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ playlist_id: currentPlaylistId })
-                });
-                const data = await response.json();
-
-                updateLogs(data.log.reverse(), true);
-
-                if (!response.ok || !data.success) {
-                    throw new Error(data.log.join('; ') || 'Failed to undo deletion.');
-                }
-
-            } catch (error) {
-                console.error('Failed to undo deletion:', error);
-                updateLogs([`🚨 Error: ${error.message}`]);
-            } finally {
-                undoButton.style.display = 'none';
-                undoButton.disabled = false;
-                undoButton.textContent = 'Undo';
             }
         }
     </script>
