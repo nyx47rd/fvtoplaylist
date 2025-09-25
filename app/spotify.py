@@ -1,7 +1,9 @@
 import spotipy
 import datetime
+import uuid
 
 from app.core import config
+from app.database import log_deleted_songs, get_last_deleted_batch, clear_deleted_batch
 
 # Moved from main.py to resolve circular import
 TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
@@ -135,3 +137,94 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
         add_log(logs, f"🚨 An unexpected error occurred: {e}")
 
     return sync_result
+
+
+def remove_last_x_songs(sp: spotipy.Spotify, user_id: str, playlist_id: str, num_to_delete: int, logs: list) -> dict:
+    """
+    Removes the last X songs from the end of a playlist.
+    """
+    if num_to_delete <= 0:
+        add_log(logs, "Number of songs to delete must be positive.")
+        return {"success": False}
+
+    add_log(logs, f"Attempting to delete the last {num_to_delete} song(s) from the playlist...")
+
+    try:
+        # 1. Get all tracks to find the last X
+        playlist_tracks = []
+        results = sp.playlist_items(playlist_id, fields='items(track(id,uri,name)),next')
+        while results:
+            for item in results['items']:
+                if item.get('track') and item['track'].get('id'):
+                    playlist_tracks.append({
+                        "id": item['track']['id'],
+                        "uri": item['track']['uri'],
+                        "name": item['track']['name']
+                    })
+            if results['next']:
+                results = sp.next(results)
+            else:
+                results = None
+
+        if len(playlist_tracks) < num_to_delete:
+            add_log(logs, f"🚨 Cannot delete {num_to_delete} songs, playlist only has {len(playlist_tracks)}.")
+            return {"success": False, "log": logs}
+
+        # 2. Identify the last X tracks
+        tracks_to_delete = playlist_tracks[-num_to_delete:]
+        track_ids_to_delete = [t['id'] for t in tracks_to_delete]
+
+        # 3. Log them to the database for undo functionality
+        batch_id = uuid.uuid4()
+        log_deleted_songs(user_id, playlist_id, tracks_to_delete, batch_id)
+        add_log(logs, f"Logged {len(tracks_to_delete)} songs for potential undo.")
+
+        # 4. Remove the tracks from Spotify
+        sp.playlist_remove_all_occurrences_of_items(playlist_id, track_ids_to_delete)
+
+        track_names = ", ".join([t['name'] for t in tracks_to_delete])
+        add_log(logs, f"✅ Successfully deleted {len(tracks_to_delete)} song(s): {track_names}")
+
+        return {"success": True, "deleted_count": len(tracks_to_delete), "batch_id": batch_id, "log": logs}
+
+    except spotipy.exceptions.SpotifyException as e:
+        add_log(logs, f"🚨 Spotify API Error during deletion: {e.msg}")
+        return {"success": False, "log": logs}
+    except Exception as e:
+        add_log(logs, f"🚨 An unexpected error occurred during deletion: {e}")
+        return {"success": False, "log": logs}
+
+
+def undo_last_deletion(sp: spotipy.Spotify, user_id: str, playlist_id: str, logs: list) -> dict:
+    """
+    Restores the last batch of deleted songs to the playlist.
+    """
+    add_log(logs, "Attempting to undo the last deletion...")
+
+    try:
+        # 1. Get the last deleted batch from the DB
+        batch_id, songs_to_restore = get_last_deleted_batch(user_id, playlist_id)
+
+        if not batch_id or not songs_to_restore:
+            add_log(logs, "No recent deletions found to undo.")
+            return {"success": False, "log": logs}
+
+        add_log(logs, f"Found a batch of {len(songs_to_restore)} songs to restore.")
+
+        # 2. Add tracks back to the playlist
+        track_uris_to_restore = [s['uri'] for s in songs_to_restore]
+        # Add them to the end of the playlist
+        sp.playlist_add_items(playlist_id, track_uris_to_restore)
+
+        # 3. Clear the batch from the database so it can't be undone again
+        clear_deleted_batch(batch_id)
+
+        add_log(logs, f"✅ Successfully restored {len(songs_to_restore)} song(s) to the playlist.")
+        return {"success": True, "restored_count": len(songs_to_restore), "log": logs}
+
+    except spotipy.exceptions.SpotifyException as e:
+        add_log(logs, f"🚨 Spotify API Error during undo: {e.msg}")
+        return {"success": False, "log": logs}
+    except Exception as e:
+        add_log(logs, f"🚨 An unexpected error occurred during undo: {e}")
+        return {"success": False, "log": logs}
