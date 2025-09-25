@@ -86,17 +86,15 @@ def _add_tracks(sp: spotipy.Spotify, playlist_id: str, track_uris: list, logs: l
     add_log(logs, f"✅ Successfully synced {len(track_uris)} new song(s).")
 
 
-def run_sync_logic(sp: spotipy.Spotify, user_id: str, ignored_track_ids: list = None) -> dict:
+def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
     """
     Orchestrates the entire sync process.
     1. Finds/creates the playlist.
     2. Fetches liked songs and playlist songs.
-    3. Calculates differences, excluding ignored tracks.
+    3. Calculates differences.
     4. Removes and adds tracks as needed.
     Returns a dictionary with the results.
     """
-    if ignored_track_ids is None:
-        ignored_track_ids = []
     sync_result = {
         "playlist_name": TARGET_PLAYLIST_NAME,
         "playlist_id": None,
@@ -119,14 +117,8 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str, ignored_track_ids: list = 
         liked_tracks = _get_all_liked_tracks(sp, logs)
         playlist_track_ids = _get_all_playlist_tracks(sp, playlist_id, logs)
 
-        # Exclude ignored tracks from the "liked" list
-        ignored_set = set(ignored_track_ids)
-        if ignored_set:
-            add_log(logs, f"Ignoring {len(ignored_set)} track(s) based on user preference.")
-
-        liked_track_ids = {track_id for track_id in liked_tracks.keys() if track_id not in ignored_set}
-
-        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id in liked_track_ids and track_id not in playlist_track_ids]
+        liked_track_ids = liked_tracks.keys()
+        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
         tracks_to_remove_ids = list(playlist_track_ids - liked_track_ids)
 
         _remove_tracks(sp, playlist_id, tracks_to_remove_ids, logs)
@@ -145,52 +137,56 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str, ignored_track_ids: list = 
     return sync_result
 
 
-def remove_last_x_songs(sp: spotipy.Spotify, playlist_id: str, num_to_delete: int, logs: list) -> dict:
+def get_playlist_songs_for_display(sp: spotipy.Spotify, playlist_id: str) -> List[dict]:
     """
-    Removes the last X songs from the end of a playlist (the oldest added songs) and returns their IDs.
+    Fetches all tracks from a playlist with details needed for display.
     """
-    if num_to_delete <= 0:
-        add_log(logs, "Number of songs to delete must be positive.")
-        return {"success": False, "log": logs}
-
-    add_log(logs, f"Attempting to delete the last {num_to_delete} song(s) from the playlist...")
-
-    try:
-        # Check total tracks to avoid unnecessary processing
-        playlist_info = sp.playlist(playlist_id, fields='tracks.total')
-        total_tracks = playlist_info['tracks']['total']
-        if total_tracks < num_to_delete:
-            add_log(logs, f"🚨 Cannot delete {num_to_delete} songs, playlist only has {total_tracks}.")
-            return {"success": False, "log": logs}
-
-        # Fetch only the first 'num_to_delete' tracks, which are the last in playlist order
-        results = sp.playlist_items(playlist_id, limit=num_to_delete, offset=0, fields='items(track(id,uri,name))')
-
-        tracks_to_delete = []
+    tracks = []
+    results = sp.playlist_items(playlist_id, fields="items(track(id,name,uri,album(images),artists(name))),next")
+    while results:
         for item in results['items']:
-            if item.get('track') and item['track'].get('id'):
-                tracks_to_delete.append({
-                    "id": item['track']['id'],
-                    "uri": item['track']['uri'],
-                    "name": item['track']['name']
+            track_info = item.get('track')
+            if track_info and track_info.get('id'):
+                tracks.append({
+                    "id": track_info['id'],
+                    "name": track_info['name'],
+                    "uri": track_info['uri'],
+                    "artist": ", ".join([artist['name'] for artist in track_info['artists']]),
+                    "image_url": track_info['album']['images'][0]['url'] if track_info['album']['images'] else None
                 })
+        if results['next']:
+            results = sp.next(results)
+        else:
+            results = None
+    return tracks
 
-        if not tracks_to_delete:
-            add_log(logs, "Could not find any tracks to delete.")
-            return {"success": False, "log": logs}
-
-        track_ids_to_delete = [t['id'] for t in tracks_to_delete]
-
-        sp.playlist_remove_all_occurrences_of_items(playlist_id, track_ids_to_delete)
-
-        track_names = ", ".join([t['name'] for t in tracks_to_delete])
-        add_log(logs, f"✅ Successfully deleted {len(tracks_to_delete)} song(s): {track_names}")
-
-        return {"success": True, "deleted_track_ids": track_ids_to_delete, "log": logs}
-
+def remove_specific_songs(sp: spotipy.Spotify, playlist_id: str, track_ids: list, logs: list) -> bool:
+    """
+    Removes a specific list of tracks from a playlist.
+    """
+    if not track_ids:
+        return True
+    add_log(logs, f"Attempting to remove {len(track_ids)} selected song(s)...")
+    try:
+        sp.playlist_remove_all_occurrences_of_items(playlist_id, track_ids)
+        add_log(logs, f"✅ Successfully removed {len(track_ids)} song(s).")
+        return True
     except spotipy.exceptions.SpotifyException as e:
         add_log(logs, f"🚨 Spotify API Error during deletion: {e.msg}")
-        return {"success": False, "log": logs}
-    except Exception as e:
-        add_log(logs, f"🚨 An unexpected error occurred during deletion: {e}")
-        return {"success": False, "log": logs}
+        return False
+
+def add_specific_songs(sp: spotipy.Spotify, playlist_id: str, track_uris: list, logs: list) -> bool:
+    """
+    Adds a specific list of tracks to a playlist.
+    """
+    if not track_uris:
+        return True
+    add_log(logs, f"Attempting to restore {len(track_uris)} selected song(s)...")
+    try:
+        # Add to the end of the playlist
+        sp.playlist_add_items(playlist_id, track_uris)
+        add_log(logs, f"✅ Successfully restored {len(track_uris)} song(s).")
+        return True
+    except spotipy.exceptions.SpotifyException as e:
+        add_log(logs, f"🚨 Spotify API Error during restoration: {e.msg}")
+        return False
