@@ -118,9 +118,12 @@
                     <button id="delete-songs-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg w-full">
                         Delete Songs...
                     </button>
-                    <button id="restore-songs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">
-                        Restore Deleted Songs...
-                    </button>
+                    <div class="relative">
+                        <button id="restore-songs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">
+                            Restore Deleted Songs...
+                        </button>
+                        <button id="clear-deleted-btn" title="Clear list of deleted songs" class="absolute top-0 right-0 -mt-2 -mr-2 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center">&times;</button>
+                    </div>
                 </div>
             </div>
 
@@ -162,6 +165,7 @@
         const actionsSection = document.getElementById('actions-section');
         const deleteSongsBtn = document.getElementById('delete-songs-btn');
         const restoreSongsBtn = document.getElementById('restore-songs-btn');
+        const clearDeletedBtn = document.getElementById('clear-deleted-btn');
         const modal = document.getElementById('song-modal');
         const modalBackdrop = document.getElementById('modal-backdrop');
         const modalTitle = document.getElementById('modal-title');
@@ -187,6 +191,10 @@
             const deletedSongs = getDeletedSongs();
             songIds.forEach(id => { delete deletedSongs[id]; });
             localStorage.setItem(DELETED_SONGS_KEY, JSON.stringify(deletedSongs));
+        }
+        function clearDeletedSongs() {
+            localStorage.removeItem(DELETED_SONGS_KEY);
+            updateLogs(['✅ Cleared the list of deleted songs.'], true);
         }
 
         // --- UI Functions ---
@@ -292,11 +300,14 @@
             syncButton.disabled = true;
             syncButton.textContent = 'Syncing...';
             updateLogs(['🚀 Initiating sync...'], true);
+
+            const ignored_track_ids = Object.keys(getDeletedSongs());
+
             try {
                 const response = await fetch('/sync-now', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({ ignored_track_ids })
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.detail || 'An unknown error occurred.');
@@ -347,6 +358,7 @@
             // Add event listeners
             deleteSongsBtn.addEventListener('click', handleDeleteFlow);
             restoreSongsBtn.addEventListener('click', handleRestoreFlow);
+            clearDeletedBtn.addEventListener('click', clearDeletedSongs);
             modalCancelBtn.addEventListener('click', closeModal);
             modalConfirmBtn.addEventListener('click', handleConfirm);
             modalBackdrop.addEventListener('click', closeModal);

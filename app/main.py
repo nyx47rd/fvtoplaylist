@@ -89,6 +89,9 @@ class TokenInfo(BaseModel):
     expires_at: int
     refresh_token: str
 
+class SyncNowRequest(BaseModel):
+    ignored_track_ids: Optional[List[str]] = []
+
 class PlaylistSongsRequest(BaseModel):
     playlist_id: str
 
@@ -101,7 +104,7 @@ class AddSongsRequest(BaseModel):
     track_uris: List[str]
 
 @app.post("/sync-now")
-async def sync_now_endpoint(request: Request):
+async def sync_now_endpoint(request: Request, sync_request: SyncNowRequest):
     token_info = get_token_from_session(request)
     if not token_info:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -117,7 +120,7 @@ async def sync_now_endpoint(request: Request):
     sp = get_spotify_client(token_info)
     user_profile = sp.current_user()
 
-    sync_result = run_sync_logic(sp, user_profile['id'])
+    sync_result = run_sync_logic(sp, user_profile['id'], sync_request.ignored_track_ids)
 
     return JSONResponse(sync_result)
 

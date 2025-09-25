@@ -87,15 +87,17 @@ def _add_tracks(sp: spotipy.Spotify, playlist_id: str, track_uris: list, logs: l
     add_log(logs, f"✅ Successfully synced {len(track_uris)} new song(s).")
 
 
-def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
+def run_sync_logic(sp: spotipy.Spotify, user_id: str, ignored_track_ids: list = None) -> dict:
     """
     Orchestrates the entire sync process.
     1. Finds/creates the playlist.
     2. Fetches liked songs and playlist songs.
-    3. Calculates differences.
+    3. Calculates differences, excluding ignored tracks.
     4. Removes and adds tracks as needed.
     Returns a dictionary with the results.
     """
+    if ignored_track_ids is None:
+        ignored_track_ids = []
     sync_result = {
         "playlist_name": TARGET_PLAYLIST_NAME,
         "playlist_id": None,
@@ -118,8 +120,14 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
         liked_tracks = _get_all_liked_tracks(sp, logs)
         playlist_track_ids = _get_all_playlist_tracks(sp, playlist_id, logs)
 
-        liked_track_ids = liked_tracks.keys()
-        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
+        # Exclude ignored tracks from the "liked" list
+        ignored_set = set(ignored_track_ids)
+        if ignored_set:
+            add_log(logs, f"Ignoring {len(ignored_set)} track(s) based on user preference.")
+
+        liked_track_ids = {track_id for track_id in liked_tracks.keys() if track_id not in ignored_set}
+
+        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id in liked_track_ids and track_id not in playlist_track_ids]
         tracks_to_remove_ids = list(playlist_track_ids - liked_track_ids)
 
         _remove_tracks(sp, playlist_id, tracks_to_remove_ids, logs)
