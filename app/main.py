@@ -12,6 +12,7 @@ from app.core.dependencies import create_spotify_oauth, get_token_from_session, 
 from app.spotify import run_sync_logic, remove_last_x_songs
 from pydantic import BaseModel
 from typing import List, Optional
+import spotipy
 
 # --- Basic Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,11 +53,13 @@ async def root(request: Request):
             sp = get_spotify_client(token_info)
             user_profile = sp.current_user()
         except spotipy.exceptions.SpotifyException:
+            # This might happen if the token is invalid or expired
             request.session.clear()
+            # Redirect to self to clear the view
             return RedirectResponse(url="/")
 
     return templates.TemplateResponse(
-        "index.html", {"request": request, "user": user_profile}
+        "index.html", {"request": request, "user": user_profile, "token_info": token_info}
     )
 
 @app.get("/login")
@@ -77,6 +80,14 @@ async def callback(request: Request):
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/")
+
+class TokenInfo(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    scope: str
+    expires_at: int
+    refresh_token: str
 
 class SyncNowRequest(BaseModel):
     ignored_track_ids: Optional[List[str]] = []
@@ -122,3 +133,20 @@ async def delete_songs_endpoint(request: Request, delete_request: DeleteSongsReq
     )
 
     return JSONResponse(result)
+
+@app.post("/api/set-token")
+async def set_token(request: Request, token_info: TokenInfo):
+    """
+    Allows the frontend to set the token from LocalStorage to re-establish a session.
+    """
+    # Validate the token by making a simple request to the Spotify API
+    try:
+        sp = spotipy.Spotify(auth=token_info.access_token)
+        user_profile = sp.current_user()
+        # If the above call succeeds, the token is valid.
+        # Store it in the server-side session.
+        request.session[config.TOKEN_INFO_SESSION_KEY] = token_info.dict()
+        return JSONResponse({"success": True, "user": user_profile})
+    except spotipy.exceptions.SpotifyException:
+        # The token is invalid or expired
+        return JSONResponse({"success": False}, status_code=401)

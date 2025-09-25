@@ -39,7 +39,7 @@
                     <img src="https://placehold.co/100/121212/a78bfa?text={{ user.display_name[0] | upper }}" alt="Profile Picture" class="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-violet-400">
                  {% endif %}
                 <p class="text-lg">Welcome, <span class="font-bold text-violet-400">{{ user.display_name }}</span>!</p>
-                <a href="/logout" class="text-sm text-gray-400 hover:text-red-500 transition-colors mt-2">Logout</a>
+                <a href="/logout" onclick="clearTokenInfo()" class="text-sm text-gray-400 hover:text-red-500 transition-colors mt-2">Logout</a>
             </div>
 
             <div class="my-6 border-t border-gray-700"></div>
@@ -66,11 +66,11 @@
             </div>
 
             <!-- Actions Section -->
-            <div id="actions-section" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6 mt-4" style="display: none;">
+            <div id="actions-section" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6 mt-4">
                 <h2 class="text-xl font-bold text-amber-300 mb-4">Playlist Actions</h2>
                 <div class="flex items-center space-x-4 mb-4">
                     <input type="number" id="delete-count" min="1" placeholder="Number of songs" class="bg-gray-700 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400 w-48">
-                    <button id="delete-button" onclick="deleteSongs()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed">
+                    <button id="delete-button" onclick="deleteSongs()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                         Delete Last Songs
                     </button>
                 </div>
@@ -94,6 +94,21 @@
 
     {% if user %}
     <script>
+        const TOKEN_INFO_KEY = 'spotifyTokenInfo';
+
+        // --- LocalStorage Functions ---
+        function getTokenInfo() {
+            return JSON.parse(localStorage.getItem(TOKEN_INFO_KEY));
+        }
+
+        function setTokenInfo(tokenInfo) {
+            localStorage.setItem(TOKEN_INFO_KEY, JSON.stringify(tokenInfo));
+        }
+
+        function clearTokenInfo() {
+            localStorage.removeItem(TOKEN_INFO_KEY);
+        }
+
         const syncButton = document.getElementById('sync-button');
         const playlistLink = document.getElementById('playlist-link');
         const logsDiv = document.getElementById('logs');
@@ -170,11 +185,11 @@
                     currentPlaylistId = data.playlist_id;
                     playlistLink.href = data.playlist_url;
                     playlistLink.textContent = data.playlist_name;
-                    actionsSection.style.display = 'block';
+                    deleteButton.disabled = false; // Enable delete button
                 } else {
                     playlistLink.href = '#';
                     playlistLink.textContent = 'Could not find or create playlist.';
-                    actionsSection.style.display = 'none';
+                    deleteButton.disabled = true; // Disable delete button
                 }
 
             } catch (error) {
@@ -227,6 +242,38 @@
                 deleteCountInput.value = '';
             }
         }
+
+        window.onload = async () => {
+            const tokenInfoFromServer = {{ token_info | tojson }};
+
+            if (tokenInfoFromServer) {
+                // User has just logged in via Spotify callback, save the token
+                setTokenInfo(tokenInfoFromServer);
+            } else {
+                // User is not logged in on the server, try to use LocalStorage token
+                const localToken = getTokenInfo();
+                if (localToken) {
+                    try {
+                        const response = await fetch('/api/set-token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(localToken)
+                        });
+
+                        if (response.ok) {
+                            // Successfully re-established session, reload the page to get the user data
+                            window.location.reload();
+                        } else {
+                            // Token is invalid or expired, clear it
+                            clearTokenInfo();
+                        }
+                    } catch (error) {
+                        console.error('Failed to re-establish session:', error);
+                        clearTokenInfo();
+                    }
+                }
+            }
+        };
     </script>
     {% endif %}
 </body>
