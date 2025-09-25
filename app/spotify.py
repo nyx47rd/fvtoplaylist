@@ -1,9 +1,7 @@
 import spotipy
 import datetime
-import uuid
 
 from app.core import config
-from app.database import log_deleted_songs, get_last_deleted_batch, clear_deleted_batch
 
 # Moved from main.py to resolve circular import
 TARGET_PLAYLIST_NAME = "Liked Songs Sync ✨"
@@ -88,15 +86,17 @@ def _add_tracks(sp: spotipy.Spotify, playlist_id: str, track_uris: list, logs: l
     add_log(logs, f"✅ Successfully synced {len(track_uris)} new song(s).")
 
 
-def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
+def run_sync_logic(sp: spotipy.Spotify, user_id: str, ignored_track_ids: list = None) -> dict:
     """
     Orchestrates the entire sync process.
     1. Finds/creates the playlist.
     2. Fetches liked songs and playlist songs.
-    3. Calculates differences.
+    3. Calculates differences, excluding ignored tracks.
     4. Removes and adds tracks as needed.
     Returns a dictionary with the results.
     """
+    if ignored_track_ids is None:
+        ignored_track_ids = []
     sync_result = {
         "playlist_name": TARGET_PLAYLIST_NAME,
         "playlist_id": None,
@@ -119,8 +119,14 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
         liked_tracks = _get_all_liked_tracks(sp, logs)
         playlist_track_ids = _get_all_playlist_tracks(sp, playlist_id, logs)
 
-        liked_track_ids = liked_tracks.keys()
-        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id not in playlist_track_ids]
+        # Exclude ignored tracks from the "liked" list
+        ignored_set = set(ignored_track_ids)
+        if ignored_set:
+            add_log(logs, f"Ignoring {len(ignored_set)} track(s) based on user preference.")
+
+        liked_track_ids = {track_id for track_id in liked_tracks.keys() if track_id not in ignored_set}
+
+        tracks_to_add_uris = [uri for track_id, uri in liked_tracks.items() if track_id in liked_track_ids and track_id not in playlist_track_ids]
         tracks_to_remove_ids = list(playlist_track_ids - liked_track_ids)
 
         _remove_tracks(sp, playlist_id, tracks_to_remove_ids, logs)
@@ -139,92 +145,52 @@ def run_sync_logic(sp: spotipy.Spotify, user_id: str) -> dict:
     return sync_result
 
 
-def remove_last_x_songs(sp: spotipy.Spotify, user_id: str, playlist_id: str, num_to_delete: int, logs: list) -> dict:
+def remove_last_x_songs(sp: spotipy.Spotify, playlist_id: str, num_to_delete: int, logs: list) -> dict:
     """
-    Removes the last X songs from the end of a playlist.
+    Removes the last X songs from the end of a playlist (the oldest added songs) and returns their IDs.
     """
     if num_to_delete <= 0:
         add_log(logs, "Number of songs to delete must be positive.")
-        return {"success": False}
+        return {"success": False, "log": logs}
 
     add_log(logs, f"Attempting to delete the last {num_to_delete} song(s) from the playlist...")
 
     try:
-        # 1. Get all tracks to find the last X
-        playlist_tracks = []
-        results = sp.playlist_items(playlist_id, fields='items(track(id,uri,name)),next')
-        while results:
-            for item in results['items']:
-                if item.get('track') and item['track'].get('id'):
-                    playlist_tracks.append({
-                        "id": item['track']['id'],
-                        "uri": item['track']['uri'],
-                        "name": item['track']['name']
-                    })
-            if results['next']:
-                results = sp.next(results)
-            else:
-                results = None
-
-        if len(playlist_tracks) < num_to_delete:
-            add_log(logs, f"🚨 Cannot delete {num_to_delete} songs, playlist only has {len(playlist_tracks)}.")
+        # Check total tracks to avoid unnecessary processing
+        playlist_info = sp.playlist(playlist_id, fields='tracks.total')
+        total_tracks = playlist_info['tracks']['total']
+        if total_tracks < num_to_delete:
+            add_log(logs, f"🚨 Cannot delete {num_to_delete} songs, playlist only has {total_tracks}.")
             return {"success": False, "log": logs}
 
-        # 2. Identify the last X tracks
-        tracks_to_delete = playlist_tracks[-num_to_delete:]
+        # Fetch only the first 'num_to_delete' tracks, which are the last in playlist order
+        results = sp.playlist_items(playlist_id, limit=num_to_delete, offset=0, fields='items(track(id,uri,name))')
+
+        tracks_to_delete = []
+        for item in results['items']:
+            if item.get('track') and item['track'].get('id'):
+                tracks_to_delete.append({
+                    "id": item['track']['id'],
+                    "uri": item['track']['uri'],
+                    "name": item['track']['name']
+                })
+
+        if not tracks_to_delete:
+            add_log(logs, "Could not find any tracks to delete.")
+            return {"success": False, "log": logs}
+
         track_ids_to_delete = [t['id'] for t in tracks_to_delete]
 
-        # 3. Log them to the database for undo functionality
-        batch_id = uuid.uuid4()
-        log_deleted_songs(user_id, playlist_id, tracks_to_delete, batch_id)
-        add_log(logs, f"Logged {len(tracks_to_delete)} songs for potential undo.")
-
-        # 4. Remove the tracks from Spotify
         sp.playlist_remove_all_occurrences_of_items(playlist_id, track_ids_to_delete)
 
         track_names = ", ".join([t['name'] for t in tracks_to_delete])
         add_log(logs, f"✅ Successfully deleted {len(tracks_to_delete)} song(s): {track_names}")
 
-        return {"success": True, "deleted_count": len(tracks_to_delete), "batch_id": batch_id, "log": logs}
+        return {"success": True, "deleted_track_ids": track_ids_to_delete, "log": logs}
 
     except spotipy.exceptions.SpotifyException as e:
         add_log(logs, f"🚨 Spotify API Error during deletion: {e.msg}")
         return {"success": False, "log": logs}
     except Exception as e:
         add_log(logs, f"🚨 An unexpected error occurred during deletion: {e}")
-        return {"success": False, "log": logs}
-
-
-def undo_last_deletion(sp: spotipy.Spotify, user_id: str, playlist_id: str, logs: list) -> dict:
-    """
-    Restores the last batch of deleted songs to the playlist.
-    """
-    add_log(logs, "Attempting to undo the last deletion...")
-
-    try:
-        # 1. Get the last deleted batch from the DB
-        batch_id, songs_to_restore = get_last_deleted_batch(user_id, playlist_id)
-
-        if not batch_id or not songs_to_restore:
-            add_log(logs, "No recent deletions found to undo.")
-            return {"success": False, "log": logs}
-
-        add_log(logs, f"Found a batch of {len(songs_to_restore)} songs to restore.")
-
-        # 2. Add tracks back to the playlist
-        track_uris_to_restore = [s['uri'] for s in songs_to_restore]
-        # Add them to the end of the playlist
-        sp.playlist_add_items(playlist_id, track_uris_to_restore)
-
-        # 3. Clear the batch from the database so it can't be undone again
-        clear_deleted_batch(batch_id)
-
-        add_log(logs, f"✅ Successfully restored {len(songs_to_restore)} song(s) to the playlist.")
-        return {"success": True, "restored_count": len(songs_to_restore), "log": logs}
-
-    except spotipy.exceptions.SpotifyException as e:
-        add_log(logs, f"🚨 Spotify API Error during undo: {e.msg}")
-        return {"success": False, "log": logs}
-    except Exception as e:
-        add_log(logs, f"🚨 An unexpected error occurred during undo: {e}")
         return {"success": False, "log": logs}

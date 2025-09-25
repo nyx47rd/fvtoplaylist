@@ -15,6 +15,3 @@ TOKEN_INFO_SESSION_KEY = "spotify_token_info"
 
 # --- Firebase Configuration ---
 FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-
-# --- Neon Database Configuration ---
-DATABASE_URL = os.getenv("DATABASE_URL")
