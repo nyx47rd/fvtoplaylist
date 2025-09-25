@@ -1,10 +1,14 @@
 import os
 import psycopg2
+import psycopg2.extras
 import logging
 import uuid
 from app.core import config
 
 logging.basicConfig(level=logging.INFO)
+
+# Register UUID adapter
+psycopg2.extras.register_uuid()
 
 def get_db_connection():
     """Establishes a connection to the database."""
