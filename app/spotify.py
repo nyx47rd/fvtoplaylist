@@ -1,5 +1,6 @@
 import spotipy
 import datetime
+from typing import List
 
 from app.core import config
 
