@@ -65,6 +65,20 @@
                 </div>
             </div>
 
+            <!-- Deletion Section -->
+            <div id="delete-section" class="text-left p-6 rounded-lg bg-gray-800/50 mb-6 mt-4" style="display: none;">
+                <h2 class="text-xl font-bold text-amber-300 mb-4">Delete Songs</h2>
+                <div class="flex items-center space-x-4">
+                    <input type="number" id="delete-count" min="1" placeholder="Number of songs" class="bg-gray-700 text-white rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400">
+                    <button id="delete-button" onclick="deleteSongs()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-lg glow-button disabled:opacity-50 disabled:cursor-not-allowed">
+                        Delete Last Songs
+                    </button>
+                    <button id="undo-button" onclick="undoDelete()" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg" style="display: none;">
+                        Undo
+                    </button>
+                </div>
+            </div>
+
         {% else %}
             <div>
                 <p class="mb-6">Please log in with your Spotify account to get started.</p>
@@ -80,22 +94,37 @@
         const syncButton = document.getElementById('sync-button');
         const playlistLink = document.getElementById('playlist-link');
         const logsDiv = document.getElementById('logs');
+        const deleteSection = document.getElementById('delete-section');
+        const deleteButton = document.getElementById('delete-button');
+        const deleteCountInput = document.getElementById('delete-count');
+        const undoButton = document.getElementById('undo-button');
 
-        function updateLogs(logs) {
-            logsDiv.innerHTML = logs.map(log => {
+        let currentPlaylistId = null;
+
+        function updateLogs(newLogs, clear = false) {
+            if (!Array.isArray(newLogs)) return;
+            const newLogHtml = newLogs.map(log => {
                 let color = 'text-gray-400';
-                if (log.includes('🔄') || log.includes('Adding')) color = 'text-blue-300';
-                if (log.includes('✅')) color = 'text-green-300';
-                if (log.includes('🚨') || log.includes('Error')) color = 'text-red-400';
+                if (log.includes('🔄') || log.includes('Adding') || log.includes('Attempting')) color = 'text-blue-300';
+                if (log.includes('✅') || log.includes('Successfully')) color = 'text-green-300';
+                if (log.includes('🚨') || log.includes('Error') || log.includes('Cannot')) color = 'text-red-400';
                 if (log.includes('🚀') || log.includes('started')) color = 'text-violet-300';
+                if (log.includes('deleted') || log.includes('Logged')) color = 'text-amber-300';
                 return `<p class="${color}">${log}</p>`;
             }).join('');
+
+            if (clear) {
+                logsDiv.innerHTML = newLogHtml;
+            } else {
+                logsDiv.innerHTML = newLogHtml + logsDiv.innerHTML;
+            }
         }
 
         async function startSync() {
             syncButton.disabled = true;
             syncButton.textContent = 'Syncing...';
-            logsDiv.innerHTML = '<p class="text-violet-300">Initiating sync...</p>';
+            updateLogs(['🚀 Initiating sync...'], true);
+            undoButton.style.display = 'none';
 
             try {
                 const response = await fetch('/sync-now', { method: 'POST' });
@@ -105,23 +134,97 @@
                     throw new Error(data.detail || 'An unknown error occurred.');
                 }
 
-                // Update dashboard with results from the sync
-                updateLogs(data.logs);
+                updateLogs(data.logs.reverse());
 
-                if(data.playlist_url) {
+                if(data.playlist_id) {
+                    currentPlaylistId = data.playlist_id;
                     playlistLink.href = data.playlist_url;
                     playlistLink.textContent = data.playlist_name;
+                    deleteSection.style.display = 'block';
                 } else {
                     playlistLink.href = '#';
                     playlistLink.textContent = 'Could not find or create playlist.';
+                    deleteSection.style.display = 'none';
                 }
 
             } catch (error) {
                 console.error('Failed to sync:', error);
-                logsDiv.innerHTML = `<p class="text-red-400">Error: ${error.message}</p>`;
+                updateLogs([`🚨 Error: ${error.message}`]);
             } finally {
                 syncButton.disabled = false;
                 syncButton.textContent = 'Sync Now';
+            }
+        }
+
+        async function deleteSongs() {
+            const numToDelete = parseInt(deleteCountInput.value, 10);
+            if (!currentPlaylistId || !numToDelete || numToDelete <= 0) {
+                updateLogs(['🚨 Please enter a valid positive number of songs to delete.'], true);
+                return;
+            }
+
+            deleteButton.disabled = true;
+            deleteButton.textContent = 'Deleting...';
+            undoButton.style.display = 'none';
+
+            try {
+                const response = await fetch('/delete-songs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        playlist_id: currentPlaylistId,
+                        num_to_delete: numToDelete
+                    })
+                });
+                const data = await response.json();
+
+                updateLogs(data.log.reverse(), true);
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.log.join('; ') || 'Failed to delete songs.');
+                }
+
+                if (data.success) {
+                    undoButton.style.display = 'inline-block';
+                }
+
+            } catch (error) {
+                console.error('Failed to delete songs:', error);
+                updateLogs([`🚨 Error: ${error.message}`]);
+            } finally {
+                deleteButton.disabled = false;
+                deleteButton.textContent = 'Delete Last Songs';
+                deleteCountInput.value = '';
+            }
+        }
+
+        async function undoDelete() {
+            if (!currentPlaylistId) return;
+
+            undoButton.disabled = true;
+            undoButton.textContent = 'Undoing...';
+
+            try {
+                const response = await fetch('/undo-delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playlist_id: currentPlaylistId })
+                });
+                const data = await response.json();
+
+                updateLogs(data.log.reverse(), true);
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.log.join('; ') || 'Failed to undo deletion.');
+                }
+
+            } catch (error) {
+                console.error('Failed to undo deletion:', error);
+                updateLogs([`🚨 Error: ${error.message}`]);
+            } finally {
+                undoButton.style.display = 'none';
+                undoButton.disabled = false;
+                undoButton.textContent = 'Undo';
             }
         }
     </script>

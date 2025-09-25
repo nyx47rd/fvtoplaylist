@@ -8,3 +8,4 @@ itsdangerous
 ytmusicapi
 firebase-admin
 google-auth-oauthlib
+psycopg2-binary
